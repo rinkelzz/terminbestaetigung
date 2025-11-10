@@ -33,7 +33,9 @@ class AutoNotifyWhatsAppConnector
 
     public function register_settings()
     {
-        register_setting(self::OPTION_KEY, self::OPTION_KEY);
+        register_setting(self::OPTION_KEY, self::OPTION_KEY, [
+            'sanitize_callback' => [$this, 'sanitize_settings'],
+        ]);
 
         add_settings_section(
             'autonotify_general_section',
@@ -69,6 +71,20 @@ class AutoNotifyWhatsAppConnector
         );
 
         add_settings_field(
+            'backend_url',
+            __('Webhook-Ziel (notify.php)', 'autonotify'),
+            [$this, 'render_text_field'],
+            'autonotify',
+            'autonotify_general_section',
+            [
+                'label_for' => 'backend_url',
+                'placeholder' => 'https://example.com/backend/notify.php',
+                'type' => 'url',
+                'description' => __('Komplette URL zu deiner installierten notify.php auf dem Keyhelp-Server.', 'autonotify'),
+            ]
+        );
+
+        add_settings_field(
             'message_template',
             __('Nachrichtenvorlage', 'autonotify'),
             [$this, 'render_textarea_field'],
@@ -85,13 +101,19 @@ class AutoNotifyWhatsAppConnector
     {
         $options = get_option(self::OPTION_KEY, []);
         $value = $options[$args['label_for']] ?? '';
+        $type = isset($args['type']) ? esc_attr($args['type']) : 'text';
         printf(
-            '<input type="text" id="%1$s" name="%2$s[%1$s]" value="%3$s" class="regular-text" placeholder="%4$s"/>',
+            '<input type="%5$s" id="%1$s" name="%2$s[%1$s]" value="%3$s" class="regular-text" placeholder="%4$s"/>',
             esc_attr($args['label_for']),
             esc_attr(self::OPTION_KEY),
             esc_attr($value),
-            esc_attr($args['placeholder'] ?? '')
+            esc_attr($args['placeholder'] ?? ''),
+            $type
         );
+
+        if (!empty($args['description'])) {
+            printf('<p class="description">%s</p>', esc_html($args['description']));
+        }
     }
 
     public function render_textarea_field($args)
@@ -136,7 +158,38 @@ class AutoNotifyWhatsAppConnector
         echo '<h2>' . esc_html__('Dein Webhook-Link', 'autonotify') . '</h2>';
         printf('<code>%s</code>', esc_html($webhookUrl));
         echo '<p>' . esc_html__('Diesen Link im Shop/Booking-Plugin als Webhook hinterlegen.', 'autonotify') . '</p>';
+
+        echo '<h2>' . esc_html__('Status', 'autonotify') . '</h2>';
+        if (empty($options['backend_url'])) {
+            echo '<div class="notice notice-error"><p><strong>' . esc_html__('Bitte trage den Webhook-Ziel-Link (notify.php) ein, sonst können keine Nachrichten versendet werden.', 'autonotify') . '</strong></p></div>';
+        } else {
+            echo '<div class="notice notice-success"><p><strong>' . esc_html__('Webhook-Ziel ist konfiguriert.', 'autonotify') . '</strong></p></div>';
+        }
         echo '</div>';
+    }
+
+    public function sanitize_settings($input)
+    {
+        $current = get_option(self::OPTION_KEY, []);
+        $sanitized = is_array($current) ? $current : [];
+
+        if (isset($input['business_name'])) {
+            $sanitized['business_name'] = sanitize_text_field($input['business_name']);
+        }
+
+        if (isset($input['whatsapp_number'])) {
+            $sanitized['whatsapp_number'] = sanitize_text_field($input['whatsapp_number']);
+        }
+
+        if (isset($input['backend_url'])) {
+            $sanitized['backend_url'] = esc_url_raw($input['backend_url']);
+        }
+
+        if (isset($input['message_template'])) {
+            $sanitized['message_template'] = wp_kses_post($input['message_template']);
+        }
+
+        return $sanitized;
     }
 }
 
@@ -155,6 +208,11 @@ add_action('rest_api_init', function () {
                 return new \WP_Error('invalid_shopid', __('Ungültiger Shop-ID Parameter', 'autonotify'), ['status' => 403]);
             }
 
+            $backendUrl = isset($options['backend_url']) ? trim($options['backend_url']) : '';
+            if (!$backendUrl) {
+                return new \WP_Error('missing_backend_url', __('Kein Webhook-Ziel hinterlegt. Bitte trage die notify.php URL ein.', 'autonotify'), ['status' => 500]);
+            }
+
             $payload = [
                 'name' => $request->get_param('name'),
                 'datum' => $request->get_param('datum'),
@@ -162,7 +220,39 @@ add_action('rest_api_init', function () {
                 'template' => $options['message_template'] ?? null,
             ];
 
-            $response = wp_remote_post('https://autonotify.de/api/notify.php?shopid=' . urlencode($expectedShopId), [
+            foreach (['name', 'datum', 'phone'] as $requiredField) {
+                if (empty($payload[$requiredField])) {
+                    return new \WP_Error('missing_field', sprintf(__('Feld "%s" ist erforderlich.', 'autonotify'), $requiredField), ['status' => 400]);
+                }
+            }
+
+            $extra = $request->get_param('extra');
+            $payload['extra'] = [];
+
+            if (is_array($extra)) {
+                $payload['extra'] = array_filter($extra, static function ($value) {
+                    return $value !== null && $value !== '';
+                });
+            }
+
+            if (!empty($options['business_name'])) {
+                $payload['extra']['business_name'] = $options['business_name'];
+            }
+
+            if (!empty($options['whatsapp_number'])) {
+                $payload['extra']['business_whatsapp'] = $options['whatsapp_number'];
+            }
+
+            if (empty($payload['extra'])) {
+                unset($payload['extra']);
+            }
+
+            $targetUrl = add_query_arg(
+                ['shopid' => $expectedShopId],
+                $backendUrl
+            );
+
+            $response = wp_remote_post($targetUrl, [
                 'headers' => ['Content-Type' => 'application/json; charset=utf-8'],
                 'body' => wp_json_encode($payload),
                 'timeout' => 10,

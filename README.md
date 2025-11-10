@@ -1,27 +1,27 @@
 # AutoNotify – Terminbestätigung via WhatsApp
 
-AutoNotify ist ein Micro-SaaS-Konzept für Kleinbetriebe, die Buchungen über eine bestehende Website oder ein WordPress-Plugin erhalten. Das Projekt demonstriert einen möglichen technischen Stack aus PHP, Node-RED und der WhatsApp Cloud API, um vollautomatische Terminbestätigungen zu versenden.
+AutoNotify ist ein Micro-SaaS-Konzept für Kleinbetriebe, die Buchungen über eine bestehende Website oder ein WordPress-Plugin erhalten. Das Projekt demonstriert einen möglichen technischen Stack aus PHP und der WhatsApp Cloud API, um vollautomatische Terminbestätigungen zu versenden – ohne zwingend Node-RED einsetzen zu müssen.
 
 ## Komponenten
 
 ### 1. Webhook (PHP)
 - Endpunkt `backend/notify.php`
 - Erwartet JSON-Daten (`name`, `datum`, `phone`, optional `template` und `extra`)
-- Rendert Platzhalter in einer Vorlage und ruft den lokalen Node-RED-Flow auf
-- Rückgabe: `{ "status": "ok" }` oder ein Fehlerobjekt
+- Erstellt daraus den Textinhalt und ruft direkt die WhatsApp Cloud API auf
+- Nutzt Umgebungsvariablen `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_ID` und optional `WHATSAPP_API_VERSION`
+- Unterstützt zusätzliche Platzhalter wie `{{business_name}}`, die vom WordPress-Plugin als `extra`-Felder mitgesendet werden
+- Rückgabe: `{ "status": "ok", "response": {...} }` oder ein Fehlerobjekt
 
-### 2. Node-RED Flow
-- Datei: `node-red/whatsapp-flow.json`
-- HTTP-In Node lauscht auf `/whatsapp`
-- Function Node baut WhatsApp-Cloud-API Payload auf
-- HTTP Request Node sendet POST an `https://graph.facebook.com/v18.0/{phone_id}/messages`
-- Flow-Kontext benötigt `whatsapp_token` und `phone_id`
-
-### 3. WordPress Plugin
+### 2. WordPress Plugin
 - Ordner: `wordpress-plugin/autonotify`
-- Erstellt Admin-Seite zur Eingabe von Betriebsname, WhatsApp-Nummer und Nachrichtenvorlage
+- Erstellt Admin-Seite zur Eingabe von Betriebsname, WhatsApp-Nummer, Nachrichtenvorlage und Backend-URL (`notify.php`)
 - Generiert individuellen Webhook-Link (`/wp-json/autonotify/v1/notify?shopid=XYZ`)
-- REST-Endpoint leitet Buchungsdaten an den PHP-Webhooks weiter
+- REST-Endpoint leitet Buchungsdaten an den PHP-Webhook weiter
+
+### 3. Node-RED Flow (optional)
+- Datei: `node-red/whatsapp-flow.json`
+- Kann importiert werden, falls du statt PHP lieber Node-RED als Integrations-Layer verwendest
+- Falls du ihn nicht nutzt, kannst du diesen Ordner ignorieren
 
 ## Einrichtung
 
@@ -29,18 +29,24 @@ AutoNotify ist ein Micro-SaaS-Konzept für Kleinbetriebe, die Buchungen über ei
    - Bei [developers.facebook.com](https://developers.facebook.com/) Projekt anlegen
    - `phone_id` und `access_token` notieren
 
-2. **Node-RED Flow importieren**
-   - Node-RED starten (`node-red` auf Server oder VPS)
-   - Flow aus `node-red/whatsapp-flow.json` importieren
-   - `whatsapp_token` und `phone_id` per Change-Node oder Umgebungsvariable setzen
+2. **PHP Webhook auf Keyhelp/V-Server installieren**
+   - Datei `backend/notify.php` nach `/var/www/<deine-domain>/web/` (oder passenden Unterordner) kopieren
+   - In Keyhelp im gewünschten vHost einen Unterordner „backend“ anlegen und die Datei dort platzieren
+   - Über Keyhelp → *Domain-Einstellungen* → *Verzeichnisschutz/Umgebungsvariablen* die Variablen setzen:
+     - `WHATSAPP_ACCESS_TOKEN` – dauerhaftes Token aus der WhatsApp Cloud API
+     - `WHATSAPP_PHONE_ID` – die Phone-ID deiner WhatsApp Business Nummer
+     - Optional `WHATSAPP_API_VERSION` (z. B. `v18.0`)
+     - Optional `ALLOWED_SHOP_IDS` – kommagetrennte Liste erlaubter `shopid`-Werte aus dem WordPress-Plugin
+   - HTTPS aktivieren (Let’s Encrypt) und URL notieren, z. B. `https://deinedomain.de/backend/notify.php`
 
-3. **PHP Webhook bereitstellen**
-   - `backend/notify.php` auf Webserver/Hosting hochladen
-   - `NODERED_URL` per Environment auf Node-RED-Endpoint zeigen lassen (optional)
-
-4. **WordPress Plugin installieren**
+3. **WordPress Plugin installieren**
    - Ordner `wordpress-plugin/autonotify` zippen und in WordPress hochladen
    - Einstellungen ausfüllen und Webhook-Link kopieren
+
+4. **Webhook-Ziel im Plugin hinterlegen**
+   - In den AutoNotify-Einstellungen die URL zu deiner `notify.php` (siehe Schritt 2) eintragen
+   - Backend meldet „Webhook-Ziel ist konfiguriert“
+   - Notiere die generierte `shopid` und trage sie – falls `ALLOWED_SHOP_IDS` gesetzt ist – im Server als erlaubten Wert ein
 
 5. **Integration testen**
    - Buchung in der bestehenden Website auslösen
@@ -63,8 +69,8 @@ Beispiel: 10 Betriebe ⇒ ca. 590 € monatlich bei geringem Aufwand.
 
 ## To-Do Checkliste
 - [ ] WhatsApp Cloud API aktivieren
-- [ ] Node-RED Flow deployen
-- [ ] PHP Webhook veröffentlichen
-- [ ] WordPress-Demo-Seite erstellen
+- [ ] PHP Webhook auf dem Keyhelp-Server veröffentlichen
+- [ ] WordPress-Plugin konfigurieren (inkl. notify.php URL)
+- [ ] Optional: Node-RED-Flow testen, falls benötigt
 - [ ] Lokale Betriebe für Beta-Test ansprechen (30 Tage gratis)
 
