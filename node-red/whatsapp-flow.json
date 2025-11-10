@@ -1,0 +1,55 @@
+[
+    {
+        "id": "http-in-node",
+        "type": "http in",
+        "z": "main",
+        "name": "Webhook Input",
+        "url": "/whatsapp",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": ""
+    },
+    {
+        "id": "prepare-node",
+        "type": "function",
+        "z": "main",
+        "name": "Prepare payload",
+        "func": "const msgText = msg.req.query.msg;\nconst to = msg.req.query.to;\nif (!msgText || !to) {\n    msg.statusCode = 400;\n    msg.payload = { error: 'Missing msg or to parameter' };\n    return msg;\n}\nmsg.headers = {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer ' + flow.get('whatsapp_token')\n};\nmsg.payload = {\n    messaging_product: 'whatsapp',\n    to,\n    type: 'text',\n    text: { body: msgText }\n};\nmsg.url = `https://graph.facebook.com/v18.0/${flow.get('phone_id')}/messages`;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": ""
+    },
+    {
+        "id": "http-request-node",
+        "type": "http request",
+        "z": "main",
+        "name": "Send to WhatsApp",
+        "method": "POST",
+        "ret": "obj",
+        "paytoqs": false,
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "authType": "",
+        "x": 500,
+        "y": 180,
+        "wires": [["response-node"]]
+    },
+    {
+        "id": "response-node",
+        "type": "http response",
+        "z": "main",
+        "name": "Return response",
+        "statusCode": "200",
+        "headers": {},
+        "wires": []
+    },
+    {
+        "id": "config-token",
+        "type": "comment",
+        "z": "main",
+        "name": "Set flow variables whatsapp_token and phone_id via Inject/Change nodes or environment",
+        "info": "Use a Change node to store your WhatsApp Cloud API credentials in the flow context."
+    }
+]
